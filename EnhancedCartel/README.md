@@ -29,3 +29,7 @@ UseListedProducts = true
 # Use products that have been discovered in cartel requests. Overrides UseListedProducts if true
 UseDiscoveredProducts = false
 ```
+
+## Credits
+- [TVGS](https://www.scheduleonegame.com/) - Benzies logo
+- [Flaticon](https://www.flaticon.com/free-icon/mixer_3690065) - Mixer icon
