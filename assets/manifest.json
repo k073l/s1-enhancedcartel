@@ -1,7 +1,7 @@
 {
     "name": "EnhancedCartel",
     "version_number": "1.0.0",
-    "website_url": "",
+    "website_url": "https://github.com/k073l/s1-enhancedcartel",
     "description": "Allows cartel to request other products than default",
     "dependencies": [
         "LavaGang-MelonLoader-0.7.0",
