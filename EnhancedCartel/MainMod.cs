@@ -1,13 +1,13 @@
 using System.Collections;
 using MelonLoader;
 using EnhancedCartel.Helpers;
-using FluffyUnderware.DevTools.Extensions;
-using ScheduleOne.Product;
 using UnityEngine;
 #if MONO
 using ScheduleOne.Cartel;
+using ScheduleOne.Product;
 #else
 using Il2CppScheduleOne.Cartel;
+using Il2CppScheduleOne.Product;
 #endif
 
 using Object = UnityEngine.Object;
@@ -35,11 +35,24 @@ public class EnhancedCartel : MelonMod
 {
     private static MelonLogger.Instance Logger;
     public static CartelDealManager CartelDealManagerInstance;
+    
+    public static MelonPreferences_Category Category;
+    public static MelonPreferences_Entry<int> ProductQuantityMin;
+    public static MelonPreferences_Entry<int> ProductQuantityMax;
+    public static MelonPreferences_Entry<bool> UseListedProducts;
+    public static MelonPreferences_Entry<bool> UseDiscoveredProducts;
 
     public override void OnInitializeMelon()
     {
         Logger = LoggerInstance;
         Logger.Msg("EnhancedCartel initialized");
+        
+        // Initialize preferences
+        Category = MelonPreferences.CreateCategory("EnhancedCartel", "Enhanced Cartel Settings");
+        ProductQuantityMin = Category.CreateEntry("ProductQuantityMin", 10, description: "Minimum quantity of products in cartel requests");
+        ProductQuantityMax = Category.CreateEntry("ProductQuantityMax", 40, description: "Maximum quantity of products in cartel requests");
+        UseListedProducts = Category.CreateEntry("UseListedProducts", true, description: "Use products that are listed for sale in cartel requests");
+        UseDiscoveredProducts = Category.CreateEntry("UseDiscoveredProducts", false, description: "Use products that have been discovered in cartel requests. Overrides UseListedProducts if true");
     }
 
     public override void OnSceneWasLoaded(int buildIndex, string sceneName)
@@ -77,14 +90,25 @@ public class EnhancedCartel : MelonMod
             Logger.Error("CartelDealManagerInstance is null, cannot tweak products.");
             yield break;
         }
+
+        CartelDealManagerInstance.ProductQuantityMin = ProductQuantityMin.Value;
+        CartelDealManagerInstance.ProductQuantityMax = ProductQuantityMax.Value;
         
         // Add custom products
         yield return WaitForPM();
         
         var defaultRequestable = CartelDealManagerInstance.RequestableProducts.AsEnumerable();
-        var listedProducts = ProductManager.ListedProducts.AsEnumerable();
+        var listedProducts = 
+            UseListedProducts.Value && !UseDiscoveredProducts.Value // if UseDiscoveredProducts is true, listed products are ignored
+                ? ProductManager.ListedProducts.AsEnumerable() 
+                : Enumerable.Empty<ProductDefinition>();
+        var discoveredProducts = 
+            UseDiscoveredProducts.Value 
+                ? ProductManager.DiscoveredProducts.AsEnumerable()
+                : Enumerable.Empty<ProductDefinition>();
         var newRequestable = listedProducts
             .Union(defaultRequestable)
+            .Union(discoveredProducts)
             .ToList();
         CartelDealManagerInstance.RequestableProducts = newRequestable.ToArray();
         foreach (var product in CartelDealManagerInstance.RequestableProducts)
@@ -92,7 +116,7 @@ public class EnhancedCartel : MelonMod
             Logger.Debug($"Requestable product: {product.Name} (ID: {product.ID})");
         }
         Logger.Debug($"CartelDealManager.RequestableProducts count: {CartelDealManagerInstance.RequestableProducts.Length}");
-        Logger.Msg($"Added {listedProducts.Count()} custom products to cartel requests.");
+        Logger.Msg($"Cartel can now request following products: {string.Join(", ", CartelDealManagerInstance.RequestableProducts.Select(p => p.Name))}");
     }
 
     private IEnumerator WaitForPM()
