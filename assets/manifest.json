@@ -1,6 +1,6 @@
 {
     "name": "EnhancedCartel",
-    "version_number": "1.0.0",
+    "version_number": "1.0.1",
     "website_url": "https://github.com/k073l/s1-enhancedcartel",
     "description": "Allows cartel to request other products than default",
     "dependencies": [

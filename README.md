@@ -4,7 +4,7 @@ Allows cartel to order other products than default ones.
 
 ![icon](https://raw.githubusercontent.com/k073l/s1-enhancedcartel/master/assets/icon.png)
 
-**Warning**: As of 2025-08-20, Cartel update (0.4.0) is available on beta branches only. As such, this mod will not work on versions <0.4.0. Tested on 0.4.0f2.
+**Warning**: >0.4.0f5 only
 
 ## Installation
 1. Install MelonLoader

@@ -1,12 +1,18 @@
-using System.Collections;
 using MelonLoader;
 using EnhancedCartel.Helpers;
+using HarmonyLib;
 using UnityEngine;
 #if MONO
+using FishNet;
+using ScheduleOne.GameTime;
 using ScheduleOne.Cartel;
+using ScheduleOne.Levelling;
 using ScheduleOne.Product;
 #else
+using Il2CppFishNet;
+using Il2CppScheduleOne.GameTime;
 using Il2CppScheduleOne.Cartel;
+using Il2CppScheduleOne.Levelling;
 using Il2CppScheduleOne.Product;
 #endif
 
@@ -28,14 +34,14 @@ public static class BuildInfo
     public const string Name = "EnhancedCartel";
     public const string Description = "Allows cartel to request other products than default";
     public const string Author = "k073l";
-    public const string Version = "1.0.0";
+    public const string Version = "1.0.1";
 }
 
 public class EnhancedCartel : MelonMod
 {
     private static MelonLogger.Instance Logger;
     public static CartelDealManager CartelDealManagerInstance;
-    
+
     public static MelonPreferences_Category Category;
     public static MelonPreferences_Entry<int> ProductQuantityMin;
     public static MelonPreferences_Entry<int> ProductQuantityMax;
@@ -46,86 +52,69 @@ public class EnhancedCartel : MelonMod
     {
         Logger = LoggerInstance;
         Logger.Msg("EnhancedCartel initialized");
-        
+
         // Initialize preferences
         Category = MelonPreferences.CreateCategory("EnhancedCartel", "Enhanced Cartel Settings");
-        ProductQuantityMin = Category.CreateEntry("ProductQuantityMin", 10, description: "Minimum quantity of products in cartel requests");
-        ProductQuantityMax = Category.CreateEntry("ProductQuantityMax", 40, description: "Maximum quantity of products in cartel requests");
-        UseListedProducts = Category.CreateEntry("UseListedProducts", true, description: "Use products that are listed for sale in cartel requests");
-        UseDiscoveredProducts = Category.CreateEntry("UseDiscoveredProducts", false, description: "Use products that have been discovered in cartel requests. Overrides UseListedProducts if true");
+        ProductQuantityMin = Category.CreateEntry("ProductQuantityMin", 10,
+            description: "Minimum quantity of products in cartel requests");
+        ProductQuantityMax = Category.CreateEntry("ProductQuantityMax", 40,
+            description: "Maximum quantity of products in cartel requests");
+        UseListedProducts = Category.CreateEntry("UseListedProducts", true,
+            description: "Use products that are listed for sale in cartel requests");
+        UseDiscoveredProducts = Category.CreateEntry("UseDiscoveredProducts", false,
+            description:
+            "Use products that have been discovered in cartel requests. Overrides UseListedProducts if true");
     }
+}
 
-    public override void OnSceneWasLoaded(int buildIndex, string sceneName)
+[HarmonyPatch(typeof(CartelDealManager), nameof(CartelDealManager.StartDeal))]
+class CartelDealManager_StartDeal_Patch
+{
+    public static bool Prefix(CartelDealManager __instance)
     {
-        Logger.Debug($"Scene loaded: {sceneName}");
-        if (sceneName == "Main")
+        if (InstanceFinder.IsServer)
         {
-            Logger.Debug("Main scene loaded, waiting for player");
-            MelonCoroutines.Start(Utils.WaitForPlayer(CaptureCartelDealManager()));
-        }
-    }
+            __instance.ProductQuantityMin = EnhancedCartel.ProductQuantityMin.Value;
+            __instance.ProductQuantityMax = EnhancedCartel.ProductQuantityMax.Value;
+            
+            if (!EnhancedCartel.UseDiscoveredProducts.Value && !EnhancedCartel.UseListedProducts.Value)
+            {
+                // Mod off, use default behavior
+                return true;
+            }
 
-    private IEnumerator CaptureCartelDealManager()
-    {
-        // I expect that network is ready by now
-        var cartelDealManager = Object.FindObjectOfType<CartelDealManager>();
-        if (cartelDealManager == null)
-        {
-            Logger.Error("CartelDealManager not found in the scene.");
-            yield return null;
-        }
-        CartelDealManagerInstance = cartelDealManager;
-        Logger.Debug("Captured CartelDealManager instance");
-        yield return TweakCartelProducts();
-    }
+            var fullRank = new FullRank(ERank.Kingpin, 0);
+            var rankProgress = Mathf.Clamp01(LevelManager.Instance.GetFullRank().ToFloat() / fullRank.ToFloat());
+            
+            var listedProducts = 
+                EnhancedCartel.UseListedProducts.Value && !EnhancedCartel.UseDiscoveredProducts.Value // if UseDiscoveredProducts is true, listed products are ignored;
+                    ? ProductManager.ListedProducts.AsEnumerable() 
+                    : Enumerable.Empty<ProductDefinition>();
+            var discoveredProducts =
+                EnhancedCartel.UseDiscoveredProducts.Value
+                    ? ProductManager.DiscoveredProducts.AsEnumerable()
+                    : Enumerable.Empty<ProductDefinition>();
+            var newRequestable = listedProducts
+                .Union(__instance.RequestableWeed.AsEnumerable())
+                .Union(discoveredProducts)
+                .ToList();
 
-    /// <summary>
-    /// Tweaks the cartel products to allow for other requests.
-    /// I **think** there might be a race condition, but it's fine
-    /// </summary>
-    private IEnumerator TweakCartelProducts()
-    {
-        if (CartelDealManagerInstance == null)
-        {
-            Logger.Error("CartelDealManagerInstance is null, cannot tweak products.");
-            yield break;
+            var productDef = newRequestable[UnityEngine.Random.Range(0, newRequestable.Count)];
+            var quantity = Mathf.RoundToInt(Mathf.Lerp(__instance.ProductQuantityMin, __instance.ProductQuantityMax, rankProgress));
+
+            var dateTime = TimeManager.Instance.GetDateTime();
+            dateTime.elapsedDays += 3;
+            dateTime.time = 401;
+            
+            var payment = Mathf.RoundToInt(productDef.MarketValue * quantity * 0.65f); // Cartel pays 65% of market value
+            
+            var cartelDealInfo = new CartelDealInfo(productDef.ID, quantity, payment, dateTime, CartelDealInfo.EStatus.Pending);
+            __instance.InitializeDealQuest(null, cartelDealInfo);
+            __instance.SendRequestMessage(cartelDealInfo);
+            __instance.ActiveDeal = cartelDealInfo;
+            return false;
         }
 
-        CartelDealManagerInstance.ProductQuantityMin = ProductQuantityMin.Value;
-        CartelDealManagerInstance.ProductQuantityMax = ProductQuantityMax.Value;
-        
-        // Add custom products
-        yield return WaitForPM();
-        
-        var defaultRequestable = CartelDealManagerInstance.RequestableProducts.AsEnumerable();
-        var listedProducts = 
-            UseListedProducts.Value && !UseDiscoveredProducts.Value // if UseDiscoveredProducts is true, listed products are ignored
-                ? ProductManager.ListedProducts.AsEnumerable() 
-                : Enumerable.Empty<ProductDefinition>();
-        var discoveredProducts = 
-            UseDiscoveredProducts.Value 
-                ? ProductManager.DiscoveredProducts.AsEnumerable()
-                : Enumerable.Empty<ProductDefinition>();
-        var newRequestable = listedProducts
-            .Union(defaultRequestable)
-            .Union(discoveredProducts)
-            .ToList();
-        CartelDealManagerInstance.RequestableProducts = newRequestable.ToArray();
-        foreach (var product in CartelDealManagerInstance.RequestableProducts)
-        {
-            Logger.Debug($"Requestable product: {product.Name} (ID: {product.ID})");
-        }
-        Logger.Debug($"CartelDealManager.RequestableProducts count: {CartelDealManagerInstance.RequestableProducts.Length}");
-        Logger.Msg($"Cartel can now request following products: {string.Join(", ", CartelDealManagerInstance.RequestableProducts.Select(p => p.Name))}");
-    }
-
-    private IEnumerator WaitForPM()
-    {
-        while (!ProductManager.InstanceExists)
-        {
-            yield return new WaitForSeconds(1f);
-        }
-        // One more for good measure
-        yield return new WaitForSeconds(1f);
+        return true;
     }
 }
