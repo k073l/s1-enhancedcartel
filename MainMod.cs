@@ -27,6 +27,12 @@ using Object = UnityEngine.Object;
 [assembly: MelonColor(1, 255, 0, 0)]
 [assembly: MelonGame("TVGS", "Schedule I")]
 
+#if (MONO)
+[assembly: MelonPlatformDomain(MelonPlatformDomainAttribute.CompatibleDomains.MONO)]
+#else
+[assembly: MelonPlatformDomain(MelonPlatformDomainAttribute.CompatibleDomains.IL2CPP)]
+#endif
+
 namespace EnhancedCartel;
 
 public static class BuildInfo
@@ -34,13 +40,12 @@ public static class BuildInfo
     public const string Name = "EnhancedCartel";
     public const string Description = "Allows cartel to request other products than default";
     public const string Author = "k073l";
-    public const string Version = "1.0.1";
+    public const string Version = "1.0.2";
 }
 
 public class EnhancedCartel : MelonMod
 {
     private static MelonLogger.Instance Logger;
-    public static CartelDealManager CartelDealManagerInstance;
 
     public static MelonPreferences_Category Category;
     public static MelonPreferences_Entry<int> ProductQuantityMin;
@@ -95,7 +100,7 @@ class CartelDealManager_StartDeal_Patch
                     ? ProductManager.DiscoveredProducts.AsEnumerable()
                     : Enumerable.Empty<ProductDefinition>();
             var newRequestable = listedProducts
-                .Union(__instance.RequestableWeed.AsEnumerable())
+                // .Union(__instance.RequestableWeed.AsEnumerable())
                 .Union(discoveredProducts)
                 .ToList();
 
