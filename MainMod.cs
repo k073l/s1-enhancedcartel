@@ -1,6 +1,7 @@
 using MelonLoader;
 using EnhancedCartel.Helpers;
 using HarmonyLib;
+using MelonLoader.Preferences;
 using UnityEngine;
 #if MONO
 using FishNet;
@@ -40,7 +41,7 @@ public static class BuildInfo
     public const string Name = "EnhancedCartel";
     public const string Description = "Allows cartel to request other products than default";
     public const string Author = "k073l";
-    public const string Version = "1.0.2";
+    public const string Version = "1.1.0";
 }
 
 public class EnhancedCartel : MelonMod
@@ -52,6 +53,10 @@ public class EnhancedCartel : MelonMod
     public static MelonPreferences_Entry<int> ProductQuantityMax;
     public static MelonPreferences_Entry<bool> UseListedProducts;
     public static MelonPreferences_Entry<bool> UseDiscoveredProducts;
+    public static MelonPreferences_Entry<int> RoundingMultiple;
+
+    public static int CeilToNearest(int value, int multiple)
+        => ((value + multiple - 1) / multiple) * multiple;
 
     public override void OnInitializeMelon()
     {
@@ -69,6 +74,10 @@ public class EnhancedCartel : MelonMod
         UseDiscoveredProducts = Category.CreateEntry("UseDiscoveredProducts", false,
             description:
             "Use products that have been discovered in cartel requests. Overrides UseListedProducts if true");
+        RoundingMultiple = Category.CreateEntry("RoundingMultiple", 1,
+            description:
+            "Round requested product quantities to nearest multiple of this value (1 = no rounding) [1-20]",
+            validator: new ValueRange<int>(1, 20));
     }
 }
 
@@ -81,7 +90,7 @@ class CartelDealManager_StartDeal_Patch
         {
             __instance.ProductQuantityMin = EnhancedCartel.ProductQuantityMin.Value;
             __instance.ProductQuantityMax = EnhancedCartel.ProductQuantityMax.Value;
-            
+
             if (!EnhancedCartel.UseDiscoveredProducts.Value && !EnhancedCartel.UseListedProducts.Value)
             {
                 // Mod off, use default behavior
@@ -90,10 +99,12 @@ class CartelDealManager_StartDeal_Patch
 
             var fullRank = new FullRank(ERank.Kingpin, 0);
             var rankProgress = Mathf.Clamp01(LevelManager.Instance.GetFullRank().ToFloat() / fullRank.ToFloat());
-            
-            var listedProducts = 
-                EnhancedCartel.UseListedProducts.Value && !EnhancedCartel.UseDiscoveredProducts.Value // if UseDiscoveredProducts is true, listed products are ignored;
-                    ? ProductManager.ListedProducts.AsEnumerable() 
+
+            var listedProducts =
+                EnhancedCartel.UseListedProducts.Value &&
+                !EnhancedCartel.UseDiscoveredProducts
+                    .Value // if UseDiscoveredProducts is true, listed products are ignored;
+                    ? ProductManager.ListedProducts.AsEnumerable()
                     : Enumerable.Empty<ProductDefinition>();
             var discoveredProducts =
                 EnhancedCartel.UseDiscoveredProducts.Value
@@ -105,15 +116,19 @@ class CartelDealManager_StartDeal_Patch
                 .ToList();
 
             var productDef = newRequestable[UnityEngine.Random.Range(0, newRequestable.Count)];
-            var quantity = Mathf.RoundToInt(Mathf.Lerp(__instance.ProductQuantityMin, __instance.ProductQuantityMax, rankProgress));
+            var quantity = EnhancedCartel.CeilToNearest(
+                Mathf.RoundToInt(Mathf.Lerp(__instance.ProductQuantityMin, __instance.ProductQuantityMax,
+                    rankProgress)), EnhancedCartel.RoundingMultiple.Value);
 
             var dateTime = TimeManager.Instance.GetDateTime();
             dateTime.elapsedDays += 3;
             dateTime.time = 401;
-            
-            var payment = Mathf.RoundToInt(productDef.MarketValue * quantity * 0.65f); // Cartel pays 65% of market value
-            
-            var cartelDealInfo = new CartelDealInfo(productDef.ID, quantity, payment, dateTime, CartelDealInfo.EStatus.Pending);
+
+            var payment =
+                Mathf.RoundToInt(productDef.MarketValue * quantity * 0.65f); // Cartel pays 65% of market value
+
+            var cartelDealInfo =
+                new CartelDealInfo(productDef.ID, quantity, payment, dateTime, CartelDealInfo.EStatus.Pending);
             __instance.InitializeDealQuest(null, cartelDealInfo);
             __instance.SendRequestMessage(cartelDealInfo);
             __instance.ActiveDeal = cartelDealInfo;
